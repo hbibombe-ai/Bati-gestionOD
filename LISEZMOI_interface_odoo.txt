@@ -1,0 +1,34 @@
+BatiGestion — Interface façon Odoo (7 novembre 2026)
+=====================================================
+
+Fichiers à déposer sur GitHub (même emplacement que dans le zip) :
+  app.py                       (modifié)  accueil en grille d'applications + barre de module
+  composants.py                (NOUVEAU, à la racine, à côté de app.py et ui.py)
+  vues/chantiers.py            (modifié)  kanban / liste / carte + fiche chantier
+  vues/tiers.py                (modifié)  kanban de contacts + fiche tiers
+  vues/devis_factures.py       (modifié)  kanban / liste + fiche devis ou facture
+  tests/test_interface_erp.py  (NOUVEAU)  8 tests de l'interface
+
+Aucune migration de base de données : rien à faire côté base. Après le dépôt, faites « Reboot app » sur
+Streamlit Cloud par précaution.
+
+Ce qui change
+-------------
+1. Écran d'accueil « Applications » (comme Odoo) : une grande icône colorée par module (Tableau de bord,
+   Commercial, Chantiers, Achats & Stocks, RH & Paie, Finance, Contacts, Comptabilité, Paramètres),
+   seulement ceux auxquels l'utilisateur a droit, + une recherche de menu (« factures », « caisse »…).
+2. Barre de module en haut de chaque page : bouton « Applications », nom du module, ses menus,
+   puis Rechercher, Alertes et le menu de l'utilisateur (Mon compte, Se déconnecter).
+3. Chantiers, Contacts, Devis, Factures : panneau de recherche avec
+   - recherche sans accents, filtres cliquables (ex. En cours, En retard, Budget dépassé, Non facturés),
+   - « Regrouper par » (État, Client, Chantier, Rôle…),
+   - bascule de vue Kanban / Liste (et Carte pour les chantiers).
+   Le kanban des chantiers est en colonnes par état ; celui des contacts montre des cartes avec initiales.
+4. Fiche (vue formulaire) : fil d'Ariane « ← Chantiers / Nom », barre d'étapes cliquable
+   (À démarrer → En cours → Suspendu → Terminé ; Brouillon → Envoyé → Accepté/Refusé pour les devis),
+   informations en onglets, documents joints.
+5. Fil d'activité à droite de chaque fiche : historique automatique (création, modifications avec
+   « ancienne valeur → nouvelle valeur ») et notes internes de l'équipe. Les notes sont enregistrées
+   dans le journal d'audit (action « Note »).
+
+Tests : 216 réussis, 5 ignorés (anciens tests marqués obsolètes V8).

@@ -1,0 +1,204 @@
+"""Bâti Gestion — MY DESTINY SARL.
+
+Gestion d'une PME du bâtiment : chantiers, devis et factures, dépenses et justificatifs, caisse et trésorerie,
+tiers, personnel et paie, dossiers achats/stocks/matériel/comptabilité. Version Python (Streamlit) du prototype
+BatiGestion, avec base centrale, identifiants personnels, droits par rôle et journal d'audit.
+
+Lancement local : streamlit run app.py
+"""
+from __future__ import annotations
+
+import streamlit as st
+
+import auth
+import composants
+import db
+import nav
+import ui
+
+st.set_page_config(page_title="Bâti Gestion · MY DESTINY", page_icon=ui.ICONE, layout="wide",
+                   initial_sidebar_state="auto")
+db.moteur()
+db.assurer_schema()   # nouvelles migrations appliquées même sans redémarrage du serveur
+auth.assurer_admin_initial()
+
+
+# ------------------------------------------------------------------ connexion
+def page_connexion() -> None:
+    ui.appliquer_style(connexion=True)
+    _, centre, _ = st.columns([1, 1.15, 1])
+    with centre:
+        st.html("<div style='height:6vh'></div>")
+        st.image(ui.LOGO_CLAIR, width=300)
+        if auth.admin_par_defaut_actif():
+            st.warning("Première installation : connectez-vous avec l'identifiant **admin** et le mot de passe "
+                       "**changez-moi**, puis choisissez un mot de passe personnel.")
+        with st.form("connexion"):
+            ident = st.text_input("Identifiant", autocomplete="username")
+            mdp = st.text_input("Mot de passe", type="password", autocomplete="current-password")
+            ok = st.form_submit_button("Se connecter", type="primary", width="stretch")
+        if ok:
+            u, err = auth.connecter(ident, mdp)
+            if err:
+                st.error(err)
+            else:
+                auth.ouvrir_session(u)
+                st.rerun()
+        st.caption("Identifiant oublié ou compte bloqué : adressez-vous à la direction, qui peut "
+                   "réinitialiser votre mot de passe.")
+
+
+def page_changement_obligatoire() -> None:
+    ui.appliquer_style(connexion=True)
+    u = auth.utilisateur()
+    _, centre, _ = st.columns([1, 1.15, 1])
+    with centre:
+        st.html("<div style='height:6vh'></div>")
+        st.image(ui.LOGO_CLAIR, width=260)
+        st.subheader(f"Bienvenue, {u['nom']}")
+        st.write("Pour votre première connexion, choisissez un mot de passe personnel : au moins 8 caractères, "
+                 "avec une lettre et un chiffre.")
+        with st.form("nouveau_mdp"):
+            m1 = st.text_input("Nouveau mot de passe", type="password", autocomplete="new-password")
+            m2 = st.text_input("Confirmer le mot de passe", type="password", autocomplete="new-password")
+            ok = st.form_submit_button("Enregistrer et continuer", type="primary", width="stretch")
+        if ok:
+            if m1 != m2:
+                st.error("Les deux mots de passe ne sont pas identiques.")
+            elif err := auth.probleme_mdp(m1):
+                st.error(err)
+            else:
+                auth.changer_mdp(u["id"], m1)
+                u["doit_changer_mdp"] = False
+                auth.ouvrir_session(u)
+                st.rerun()
+        if st.button("Se déconnecter"):
+            auth.deconnecter()
+            st.rerun()
+
+
+# Session conservée à l'actualisation de la page grâce au jeton signé dans l'adresse.
+if auth.utilisateur() is None and (j := st.query_params.get("s")):
+    if u := auth.depuis_jeton(j):
+        st.session_state["utilisateur"] = u
+        st.session_state["jeton"] = j
+    else:
+        st.query_params.clear()
+
+utilisateur = auth.utilisateur()
+if utilisateur is None:
+    page_connexion()
+    st.stop()
+if st.session_state.get("jeton"):
+    st.query_params["s"] = st.session_state["jeton"]
+if utilisateur.get("doit_changer_mdp"):
+    page_changement_obligatoire()
+    st.stop()
+
+ui.appliquer_style()
+composants.appliquer_style_erp()
+
+# ------------------------------------------------------------------ navigation
+try:
+    from vues import (accueil, audit, caisse, chantiers, compte, comptes_tiers, depenses,  # noqa: E402
+                      achats_stock, comptabilite_generale, devis_factures, dossiers, justificatifs, paie, personnel,
+                      presence_kobo, rapports, recherche, reprise_historique, sauvegarde, societe, taux, tiers,
+                      utilisateurs)
+    from vues import memo_v7
+    from vues import imports as centre_imports
+except ModuleNotFoundError as e:
+    st.error(f"Fichier introuvable : {e.name}. Les dossiers « vues » et « imports » doivent être déposés sur GitHub, à "
+             "côté de app.py, avec les dossiers « static » et « .streamlit ». Ajoutez-les puis redémarrez l’application.")
+    st.stop()
+reprise = reprise_historique
+
+
+def espace(cle: str):
+    def _page():
+        dossiers.page_espace(cle)
+    _page.__name__ = f"espace_{cle}"
+    return _page
+
+
+def doc(kind: str):
+    def _page():
+        devis_factures.page(kind)
+    _page.__name__ = f"doc_{kind}"
+    return _page
+
+
+def tresor(mode: str):
+    def _page():
+        caisse.page(mode)
+    _page.__name__ = f"tresor_{mode}"
+    return _page
+
+
+# (section, titre, url, icône, module(s) requis, fonction)
+PAGES = [
+    ("Accueil", "Vue d’ensemble", "vue-ensemble", "dashboard", ["accueil"], accueil.page),
+    ("Accueil", "Recherche globale", "recherche", "search", ["recherche"], recherche.page),
+    ("Accueil", "Rapports et alertes", "rapports", "notifications", ["rapports"], rapports.page),
+    ("Commercial", "Devis", "devis", "request_quote", ["commercial"], doc("quotes")),
+    ("Commercial", "Factures", "factures", "receipt_long", ["commercial"], doc("invoices")),
+    ("Commercial", "Prospects et contrats", "commercial", "handshake", ["commercial"], espace("commercial")),
+    ("Projets & Chantiers", "Chantiers", "chantiers", "construction", ["chantiers"], chantiers.page),
+    ("Projets & Chantiers", "DQE, situations, qualité", "dossiers-chantier", "fact_check", ["projets"],
+     espace("projets")),
+    ("Achats & Stocks", "Achats et stock", "achats-stock", "inventory",
+     ["demandes_achat", "chiffrage_achats", "factures_achat", "magasin", "achats"], achats_stock.page),
+    ("Achats & Stocks", "Dossiers d’achat (lecture)", "achats", "shopping_cart", ["achats"], espace("achats")),
+    ("Achats & Stocks", "Dossiers de stock", "stocks", "inventory_2", ["achats"], espace("stocks")),
+    ("Achats & Stocks", "Matériel et charroi", "charroi", "local_shipping", ["charroi"], espace("charroi")),
+    ("RH & Paie", "Personnel et pointage", "personnel", "badge", ["personnel", "pointage"], personnel.page),
+    ("RH & Paie", "Présence KoboCollect", "presence-kobo", "phone_android", ["pointage"], presence_kobo.page),
+    ("RH & Paie", "Paie", "paie", "payments", ["paie"], paie.page),
+    ("RH & Paie", "Congés, missions, avances", "dossiers-rh", "event_available", ["personnel"], espace("rh")),
+    ("Finance", "Circuit financier V7", "circuit-v7", "account_tree", ["depenses"], memo_v7.page),
+    ("Finance", "Dépenses", "depenses", "shopping_bag", ["depenses"], depenses.page),
+    ("Finance", "Justificatifs", "justificatifs", "attach_file", ["justificatifs"], justificatifs.page),
+    ("Finance", "Journal de caisse", "caisse", "point_of_sale", ["tresorerie"], tresor("cash")),
+    ("Finance", "Trésorerie", "tresorerie", "account_balance", ["tresorerie"], tresor("treasury")),
+    ("Finance", "Taux de change", "taux", "currency_exchange", ["tresorerie", "comptabilite"], taux.page),
+    ("Tiers", "Clients et fournisseurs", "tiers", "contacts", ["tiers"], tiers.page),
+    ("Tiers", "Comptes tiers", "comptes-tiers", "account_balance_wallet", ["comptes"], comptes_tiers.page),
+    ("Comptabilité & Documents", "Comptabilité générale", "comptabilite-generale", "account_balance_wallet",
+     ["comptabilite"], comptabilite_generale.page),
+    ("Comptabilité & Documents", "Comptabilité et fiscalité", "comptabilite", "calculate", ["comptabilite"],
+     espace("comptabilite")),
+    ("Comptabilité & Documents", "Registres, garanties, tâches", "documents", "folder_open", ["documents"],
+     espace("administration")),
+    ("Comptabilité & Documents", "Centre de reprise et d’import", "imports", "upload_file", ["imports"],
+     centre_imports.page),
+    ("Comptabilité & Documents", "Reprise historique (lots chantier)", "reprise", "history", ["reprise"], reprise.page),
+    ("Administration", "Société", "societe", "apartment", ["societe"], societe.page),
+    ("Administration", "Utilisateurs", "utilisateurs", "group", ["utilisateurs"], utilisateurs.page),
+    ("Administration", "Paramètres et sauvegarde", "sauvegarde", "settings", ["sauvegarde"], sauvegarde.page),
+    ("Administration", "Journal d’audit", "audit", "manage_search", ["audit"], audit.page),
+    ("Administration", "Mon compte", "mon-compte", "person", [], compte.page),
+]
+
+sections: dict[str, list] = {}
+nav.PAGES.clear()
+for section, titre, url, icone, modules, fn in PAGES:
+    if modules and not any(auth.voit(m) for m in modules):
+        continue
+    pg = st.Page(fn, title=titre, url_path=url, icon=f":material/{icone}:")
+    nav.PAGES[url] = pg
+    sections.setdefault(section, []).append(pg)
+
+
+def applications() -> None:
+    composants.page_applications(sections, utilisateur)
+
+
+# Accueil façon Odoo : une grille d'applications, puis une barre propre à chaque module (menu natif masqué).
+page_apps = st.Page(applications, title="Applications", url_path=composants.URL_APPLICATIONS, icon=":material/apps:",
+                    default=True)
+nav.PAGES[composants.URL_APPLICATIONS] = page_apps
+
+st.logo(ui.LOGO_CLAIR, size="large", link=None)
+page_active = st.navigation({"": [page_apps], **sections}, position="hidden")
+composants.barre_module(page_active, page_apps, sections, utilisateur,
+                        auth.libelle_poste(utilisateur['id'], utilisateur['role']))
+page_active.run()
